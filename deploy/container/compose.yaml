@@ -4,8 +4,9 @@
 # also works where Compose can't build images, like Hostinger's Docker Manager. docs/self-hosting.md
 # has the details.
 #
-#   AGENT_OFFICE_DOMAIN=office.example.com AGENT_OFFICE_PASSWORD="$(openssl rand -base64 18)" \
-#     docker compose -f compose.yaml up -d
+#   printf 'AGENT_OFFICE_DOMAIN=office.example.com\nAGENT_OFFICE_PASSWORD=%s\n' "$(openssl rand -base64 18)" >.env
+#   chmod 600 .env; cat .env     # the office password: write it down
+#   docker compose -f compose.yaml up -d
 #
 # Traefik needs its Docker provider on, an entrypoint for 443 and a certificate resolver; their
 # names default to the ones Hostinger's template uses (websecure, web, letsencrypt).
@@ -17,19 +18,27 @@ services:
     init: true
     # Workers' terminals get a moment to save their sessions before the container goes.
     stop_grace_period: 30s
+    # Cloned next to its final place and moved there, so a clone cut short is never mistaken for one.
     command:
       - bash
       - -c
       - >-
         set -e;
-        [ -d /opt/agent-office/.git ] ||
+        [ -d /opt/agent-office ] || {
+        rm -rf /opt/agent-office.tmp;
         git clone --depth 1 --branch '${AGENT_OFFICE_REF:-main}'
-        '${AGENT_OFFICE_REPO:-https://github.com/AgentSystemLabs/agent-office.git}' /opt/agent-office;
+        '${AGENT_OFFICE_REPO:-https://github.com/AgentSystemLabs/agent-office.git}' /opt/agent-office.tmp;
+        mv /opt/agent-office.tmp /opt/agent-office; };
+        [ -x /opt/agent-office/deploy/container/bootstrap.sh ] || {
+        echo 'agent-office: this branch has no deploy/container/bootstrap.sh; set AGENT_OFFICE_REPO and AGENT_OFFICE_REF';
+        rm -rf /opt/agent-office; exit 1; };
         exec /opt/agent-office/deploy/container/bootstrap.sh
     environment:
       # Listen where Traefik reaches it. No AGENT_OFFICE_PUBLIC_HOST: the container's SSH isn't
       # published, so teammates come in by invite link (🔑 Accounts), not 👥 Invite teammates.
       - AGENT_OFFICE_BEHIND_PROXY=1
+      # As in the image: workers' terminals speak UTF-8.
+      - LANG=C.UTF-8
       # The rest come from the environment (or an .env file next to this one) when they're set.
       # The office password. Leave it out and set AGENT_OFFICE_CLAIM_TOKEN instead to have the office
       # make one and show it once, at https://$AGENT_OFFICE_DOMAIN/claim?t=<token>.

@@ -6,8 +6,11 @@ PROVISION=/opt/agent-office/deploy/provision.sh
 
 # The office runs as agentoffice, like on a server set up by provision.sh: node's own user (uid 1000),
 # renamed, with its home on the volume.
-usermod --login agentoffice --home /data/home --shell /bin/bash --password '*' node
-groupmod --new-name agentoffice node
+# Each step is safe to run again: bootstrap.sh reruns this after a first start that was cut short.
+if id node &>/dev/null; then
+  usermod --login agentoffice --home /data/home --shell /bin/bash --password '*' node
+  groupmod --new-name agentoffice node
+fi
 rm -rf /home/node
 
 # The team helper, the tunnel-only login and sshd's limits for `office` are provision.sh's own, so
@@ -29,8 +32,8 @@ chmod 755 /usr/local/bin/agent-office-team /usr/local/bin/agent-office-tunnel
 
 # Teammates' keys go in office's authorized_keys, which the helper edits. It lives on the volume
 # (start.sh makes /data/team), so invites survive redeploys.
-useradd --create-home --shell /bin/sh --password '*' office
-ln -s /data/team /home/office/.ssh
+id office &>/dev/null || useradd --create-home --shell /bin/sh --password '*' office
+ln -sfn /data/team /home/office/.ssh
 echo 'agentoffice ALL=(root) NOPASSWD: /usr/local/bin/agent-office-team' >/etc/sudoers.d/agent-office
 chmod 440 /etc/sudoers.d/agent-office
 visudo -cqf /etc/sudoers.d/agent-office
