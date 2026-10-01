@@ -8,6 +8,14 @@
 #   chmod 600 .env; cat .env     # the office password: write it down
 #   docker compose -f compose.yaml up -d
 #
+# Voice calls between networks that block direct connections (mobile, office and CGNAT ones) need
+# a TURN relay. Add these two lines to .env and the turn service below starts too, on this host:
+#
+#   COMPOSE_PROFILES=turn
+#   TURN_PASSWORD=<openssl rand -hex 16>
+#
+# It needs UDP and TCP 3478 and UDP 49160-49200 open in the server's firewall.
+#
 # Traefik needs its Docker provider on, an entrypoint for 443 and a certificate resolver; their
 # names default to the ones Hostinger's template uses (websecure, web, letsencrypt).
 services:
@@ -50,6 +58,9 @@ services:
       # A GitHub token (repo, read:org, workflow) signs the office's GitHub CLI in, so it can clone
       # floors and open pull requests; without one, run gh auth login at a desk.
       - AGENT_OFFICE_GITHUB_TOKEN
+      # TURN servers for voice, separated by spaces (turn:user:pass@host:port). With TURN_PASSWORD set,
+      # the turn service below on this host, over UDP and TCP.
+      - AGENT_OFFICE_TURN=${AGENT_OFFICE_TURN:-${TURN_PASSWORD:+turn:office:${TURN_PASSWORD:-}@${AGENT_OFFICE_DOMAIN}:3478 turn:office:${TURN_PASSWORD:-}@${AGENT_OFFICE_DOMAIN}:3478?transport=tcp}}
     volumes:
       - office-data:/data
     labels:
@@ -65,6 +76,31 @@ services:
       - traefik.http.routers.agent-office-http.middlewares=agent-office-https
       - traefik.http.middlewares.agent-office-https.redirectscheme.scheme=https
       - traefik.http.middlewares.agent-office-https.redirectscheme.permanent=true
+
+  # A TURN relay (coturn) for voice, started with COMPOSE_PROFILES=turn. On the host's network, so the
+  # relay ports it hands out are the server's own. It won't relay into private networks (the
+  # containers next to it, the cloud's metadata address), only between the people in a call.
+  turn:
+    image: coturn/coturn:4.6
+    profiles: [turn]
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - TURN_PASSWORD
+    entrypoint:
+      - sh
+      - -c
+      - >-
+        [ -n "$$TURN_PASSWORD" ] || { echo 'turn: set TURN_PASSWORD'; exit 1; };
+        exec turnserver -n --log-file=stdout --no-cli --no-tls --no-dtls --fingerprint --lt-cred-mech
+        --realm='${AGENT_OFFICE_DOMAIN}' --user="office:$$TURN_PASSWORD"
+        --listening-port=3478 --min-port=49160 --max-port=49200
+        --no-multicast-peers --no-loopback-peers
+        --denied-peer-ip=0.0.0.0-0.255.255.255 --denied-peer-ip=10.0.0.0-10.255.255.255
+        --denied-peer-ip=100.64.0.0-100.127.255.255 --denied-peer-ip=127.0.0.0-127.255.255.255
+        --denied-peer-ip=169.254.0.0-169.254.255.255 --denied-peer-ip=172.16.0.0-172.31.255.255
+        --denied-peer-ip=192.168.0.0-192.168.255.255 --denied-peer-ip=::1 --denied-peer-ip=fc00::-fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff
+        --denied-peer-ip=fe80::-febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff
 
 volumes:
   office-data:
