@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Starts the office in its container (deploy/container/Dockerfile): sshd on port 22, then the
-# office as agentoffice on 127.0.0.1:4600.
+# office as agentoffice on 127.0.0.1:4600 (0.0.0.0:4600 with AGENT_OFFICE_BEHIND_PROXY=1).
 #
 # Everything that has to outlive a restart or a redeploy lives on the volume at /data:
 #   /data/home   agentoffice's home: the office's data in ~/agent-office (password, accounts, floors,
@@ -68,4 +68,9 @@ if [[ ! -f $RUN_HOME/agent-office/.agent-office/projects-folder.json ]]; then
 fi
 "${AS_USER[@]}" node /usr/local/lib/agent-office/onboard.js $RUN_HOME/workspace
 
-exec "${AS_USER[@]}" node /opt/agent-office/bin/agent-office.js --host 127.0.0.1 --port 4600 --no-open
+# Behind a reverse proxy on the same Docker host (Traefik, Caddy: deploy/container/compose.yaml), the
+# proxy reaches the office over Docker's network, so it listens there and trusts X-Forwarded-*.
+LISTEN=(--host 127.0.0.1)
+[[ "${AGENT_OFFICE_BEHIND_PROXY:-}" == 1 ]] && LISTEN=(--host 0.0.0.0 --trust-proxy)
+
+exec "${AS_USER[@]}" node /opt/agent-office/bin/agent-office.js "${LISTEN[@]}" --port 4600 --no-open

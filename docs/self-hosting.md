@@ -37,6 +37,15 @@ curl -fsSL https://raw.githubusercontent.com/AgentSystemLabs/agent-office/main/d
 
 It installs [Caddy](https://caddyserver.com), which gets a certificate from Let's Encrypt by itself and serves the office on https://office.example.com. The claim link is then `https://office.example.com/claim?t=…`. Give teammates an invite link each from **🔑 Accounts**.
 
+**On a Docker host with Traefik.** A server that already runs Traefik for its other apps (Hostinger's "Ubuntu with Docker and Traefik" VPS, for one) takes the office as one more Compose project, [`deploy/container/compose.yaml`](../deploy/container/compose.yaml). Point a DNS record at the server, then, next to the file:
+
+```bash
+AGENT_OFFICE_DOMAIN=office.example.com AGENT_OFFICE_PASSWORD="$(openssl rand -base64 18)" \
+  docker compose -f compose.yaml up -d --build
+```
+
+On Hostinger you can also paste the file into the VPS's **Docker Manager** (or its API's "create project"), with those two variables as the project's environment. Docker builds the image from GitHub with [`deploy/container/Dockerfile`](../deploy/container/Dockerfile), the one Railway, Fly.io and Dokploy use; `AGENT_OFFICE_SOURCE` picks another repository or branch (`https://github.com/you/agent-office.git#my-branch`). `AGENT_OFFICE_BEHIND_PROXY=1` has the office listen on the container's network and trust Traefik's `X-Forwarded-*`; sshd still runs in the container, but its port isn't published, so everyone signs in on the domain and teammates join by an invite link from **🔑 Accounts** rather than **👥 Invite teammates**. The labels assume Traefik's Docker provider and Hostinger's names, `websecure`, `web` and `letsencrypt`; set `TRAEFIK_ENTRYPOINT`, `TRAEFIK_HTTP_ENTRYPOINT` or `TRAEFIK_CERTRESOLVER` for others. Everything the office keeps is on the `office-data` volume, as in the [Dokploy reference](dokploy.md), and Claude signs in with `/login` in the first worker's terminal (or pass `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`). To update, run the same command again; it rebuilds from the branch's latest commit. Traefik v3 cuts any request it's still reading after 60 seconds, WebSockets included, so give its HTTPS entrypoint `--entrypoints.websecure.transport.respondingTimeouts.readTimeout=0`, or the office reconnects every minute.
+
 **On your Tailscale network.** No domain, and no ports to open: add `--tailscale`, and the server joins your tailnet and serves the office on `https://agent-office.<your-tailnet>.ts.net` with [Tailscale Serve](https://tailscale.com/kb/1312/serve), which brings its own certificate:
 
 ```bash
