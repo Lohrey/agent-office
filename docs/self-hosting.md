@@ -37,6 +37,15 @@ curl -fsSL https://raw.githubusercontent.com/AgentSystemLabs/agent-office/main/d
 
 It installs [Caddy](https://caddyserver.com), which gets a certificate from Let's Encrypt by itself and serves the office on https://office.example.com. The claim link is then `https://office.example.com/claim?t=…`. Give teammates an invite link each from **🔑 Accounts**.
 
+**On a Docker host with Traefik.** A server that already runs Traefik for its other apps (Hostinger's "Ubuntu with Docker and Traefik" VPS, for one) takes the office as one more Compose project, [`deploy/container/compose.yaml`](../deploy/container/compose.yaml). Point a DNS record at the server, then, next to the file:
+
+```bash
+AGENT_OFFICE_DOMAIN=office.example.com AGENT_OFFICE_PASSWORD="$(openssl rand -base64 18)" \
+  docker compose -f compose.yaml up -d
+```
+
+On Hostinger, paste the file into the VPS's **Docker Manager** instead (or send it to the API's "create project"), with those two variables as the project's environment. Nothing is built ahead of time, so it works where Compose can't build images: the container starts from the stock `node:22-bookworm`, clones the repository, and [`deploy/container/bootstrap.sh`](../deploy/container/bootstrap.sh) installs what [`deploy/container/Dockerfile`](../deploy/container/Dockerfile) would, builds the office and starts it. That takes a few minutes the first time; until then Traefik answers with a 404 or a 502. `AGENT_OFFICE_REPO` and `AGENT_OFFICE_REF` pick another repository or branch. `AGENT_OFFICE_BEHIND_PROXY=1` has the office listen on the container's network and trust Traefik's `X-Forwarded-*`. sshd still runs in the container, but its port isn't published, so everyone signs in on the domain and teammates join by an invite link from **🔑 Accounts** rather than **👥 Invite teammates**. The labels assume Traefik's Docker provider and Hostinger's names, `websecure`, `web` and `letsencrypt`; set `TRAEFIK_ENTRYPOINT`, `TRAEFIK_HTTP_ENTRYPOINT` or `TRAEFIK_CERTRESOLVER` for others. Everything the office keeps is on the `office-data` volume, laid out as in the [Dokploy reference](dokploy.md), and Claude signs in with `/login` in the first worker's terminal (or pass `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`). A restart keeps the build; to update, recreate the container (`docker compose up -d --force-recreate`, or create the project again in the Docker Manager), and it clones and builds the branch's latest commit.
+
 **On your Tailscale network.** No domain, and no ports to open: add `--tailscale`, and the server joins your tailnet and serves the office on `https://agent-office.<your-tailnet>.ts.net` with [Tailscale Serve](https://tailscale.com/kb/1312/serve), which brings its own certificate:
 
 ```bash

@@ -1,0 +1,58 @@
+# Agent Office on any Docker host that already runs Traefik (a Hostinger "Docker and Traefik" VPS,
+# say), on https://$AGENT_OFFICE_DOMAIN. Nothing is built ahead of time: the container clones the
+# repository and builds the office on its first start (deploy/container/bootstrap.sh), so this file
+# also works where Compose can't build images, like Hostinger's Docker Manager. docs/self-hosting.md
+# has the details.
+#
+#   AGENT_OFFICE_DOMAIN=office.example.com AGENT_OFFICE_PASSWORD="$(openssl rand -base64 18)" \
+#     docker compose -f compose.yaml up -d
+#
+# Traefik needs its Docker provider on, an entrypoint for 443 and a certificate resolver; their
+# names default to the ones Hostinger's template uses (websecure, web, letsencrypt).
+services:
+  office:
+    image: node:22-bookworm
+    restart: unless-stopped
+    # Reaps what workers leave behind, as tini does in the image.
+    init: true
+    # Workers' terminals get a moment to save their sessions before the container goes.
+    stop_grace_period: 30s
+    command:
+      - bash
+      - -c
+      - >-
+        set -e;
+        [ -d /opt/agent-office/.git ] ||
+        git clone --depth 1 --branch '${AGENT_OFFICE_REF:-main}'
+        '${AGENT_OFFICE_REPO:-https://github.com/AgentSystemLabs/agent-office.git}' /opt/agent-office;
+        exec /opt/agent-office/deploy/container/bootstrap.sh
+    environment:
+      # Listen where Traefik reaches it. No AGENT_OFFICE_PUBLIC_HOST: the container's SSH isn't
+      # published, so teammates come in by invite link (🔑 Accounts), not 👥 Invite teammates.
+      - AGENT_OFFICE_BEHIND_PROXY=1
+      # The rest come from the environment (or an .env file next to this one) when they're set.
+      # The office password. Leave it out and set AGENT_OFFICE_CLAIM_TOKEN instead to have the office
+      # make one and show it once, at https://$AGENT_OFFICE_DOMAIN/claim?t=<token>.
+      - AGENT_OFFICE_PASSWORD
+      - AGENT_OFFICE_CLAIM_TOKEN
+      # Workers sign in to Claude with one of these instead of /login in the first one's terminal.
+      - CLAUDE_CODE_OAUTH_TOKEN
+      - ANTHROPIC_API_KEY
+    volumes:
+      - office-data:/data
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.agent-office.rule=Host(`${AGENT_OFFICE_DOMAIN:?set AGENT_OFFICE_DOMAIN}`)
+      - traefik.http.routers.agent-office.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}
+      - traefik.http.routers.agent-office.tls.certresolver=${TRAEFIK_CERTRESOLVER:-letsencrypt}
+      - traefik.http.routers.agent-office.service=agent-office
+      - traefik.http.services.agent-office.loadbalancer.server.port=4600
+      # Plain http on the same name goes to https, where voice and screen sharing work.
+      - traefik.http.routers.agent-office-http.rule=Host(`${AGENT_OFFICE_DOMAIN}`)
+      - traefik.http.routers.agent-office-http.entrypoints=${TRAEFIK_HTTP_ENTRYPOINT:-web}
+      - traefik.http.routers.agent-office-http.middlewares=agent-office-https
+      - traefik.http.middlewares.agent-office-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.agent-office-https.redirectscheme.permanent=true
+
+volumes:
+  office-data:
