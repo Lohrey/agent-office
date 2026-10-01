@@ -16,6 +16,8 @@ say() { echo "agent-office-bootstrap: $*"; }
 if [[ ! -f $READY ]]; then
   say "installing the office's packages (first start of this container)"
   export DEBIAN_FRONTEND=noninteractive
+  # A first start that was stopped halfway (a restart, a reboot) can leave dpkg mid-install.
+  dpkg --configure -a
   # The Dockerfile's packages, and the GitHub CLI from GitHub's own apt repo.
   apt-get update -qq
   apt-get install -y -qq --no-install-recommends openssh-server sudo tini procps ca-certificates curl git less build-essential python3 >/dev/null
