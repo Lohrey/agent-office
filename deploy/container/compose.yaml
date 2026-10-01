@@ -1,22 +1,31 @@
 # Agent Office on any Docker host that already runs Traefik (a Hostinger "Docker and Traefik" VPS,
-# say), on https://$AGENT_OFFICE_DOMAIN. Docker builds the image straight from GitHub, so the host
-# needs nothing but this file and a DNS record pointing the domain at it. docs/self-hosting.md has
-# the details.
+# say), on https://$AGENT_OFFICE_DOMAIN. Nothing is built ahead of time: the container clones the
+# repository and builds the office on its first start (deploy/container/bootstrap.sh), so this file
+# also works where Compose can't build images, like Hostinger's Docker Manager. docs/self-hosting.md
+# has the details.
 #
 #   AGENT_OFFICE_DOMAIN=office.example.com AGENT_OFFICE_PASSWORD="$(openssl rand -base64 18)" \
-#     docker compose -f compose.yaml up -d --build
+#     docker compose -f compose.yaml up -d
 #
 # Traefik needs its Docker provider on, an entrypoint for 443 and a certificate resolver; their
 # names default to the ones Hostinger's template uses (websecure, web, letsencrypt).
 services:
   office:
-    build:
-      context: ${AGENT_OFFICE_SOURCE:-https://github.com/AgentSystemLabs/agent-office.git#main}
-      dockerfile: deploy/container/Dockerfile
-    image: agent-office:latest
+    image: node:22-bookworm
     restart: unless-stopped
+    # Reaps what workers leave behind, as tini does in the image.
+    init: true
     # Workers' terminals get a moment to save their sessions before the container goes.
     stop_grace_period: 30s
+    command:
+      - bash
+      - -c
+      - >-
+        set -e;
+        [ -d /opt/agent-office/.git ] ||
+        git clone --depth 1 --branch '${AGENT_OFFICE_REF:-main}'
+        '${AGENT_OFFICE_REPO:-https://github.com/AgentSystemLabs/agent-office.git}' /opt/agent-office;
+        exec /opt/agent-office/deploy/container/bootstrap.sh
     environment:
       # Listen where Traefik reaches it. No AGENT_OFFICE_PUBLIC_HOST: the container's SSH isn't
       # published, so teammates come in by invite link (🔑 Accounts), not 👥 Invite teammates.
