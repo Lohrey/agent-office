@@ -47,6 +47,9 @@ services:
       # Workers sign in to Claude with one of these instead of /login in the first one's terminal.
       - CLAUDE_CODE_OAUTH_TOKEN
       - ANTHROPIC_API_KEY
+      # A GitHub token (repo, read:org, workflow) signs the office's GitHub CLI in, so it can clone
+      # floors and open pull requests; without one, run gh auth login at a desk.
+      - AGENT_OFFICE_GITHUB_TOKEN
     volumes:
       - office-data:/data
     labels:

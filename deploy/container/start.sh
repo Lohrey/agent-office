@@ -61,6 +61,28 @@ if [[ ! -x $RUN_HOME/.local/bin/claude ]]; then
   "${AS_USER[@]}" bash -c 'curl -fsSL https://claude.ai/install.sh | bash' >/dev/null ||
     say "couldn't install Claude Code; it's tried again at the next start"
 fi
+# A GitHub token in AGENT_OFFICE_GITHUB_TOKEN signs the GitHub CLI in, as deploy/railway.sh does over
+# SSH: kept in gh's config on the volume, so gh, git, the boards and the workers all use it. Hosts
+# with no SSH in (deploy/container/compose.yaml) have no other way to do it before the first floor.
+if [[ -n "${AGENT_OFFICE_GITHUB_TOKEN:-}" ]]; then
+  if printf '%s' "$AGENT_OFFICE_GITHUB_TOKEN" |
+    "${AS_USER[@]}" gh auth login --hostname github.com --git-protocol https --with-token &&
+    "${AS_USER[@]}" gh auth setup-git --hostname github.com; then
+    # Commits need a name and an email: the token's own, unless git already has some.
+    if [[ -z "$("${AS_USER[@]}" git config --global user.email || true)" ]]; then
+      gh_user=$("${AS_USER[@]}" gh api user --jq '[.name // .login, "\(.id)+\(.login)@users.noreply.github.com"] | @tsv' || true)
+      if [[ -n "$gh_user" ]]; then
+        "${AS_USER[@]}" git config --global user.name "${gh_user%%$'\t'*}"
+        "${AS_USER[@]}" git config --global user.email "${gh_user##*$'\t'}"
+      fi
+    fi
+    say "the GitHub CLI is signed in with AGENT_OFFICE_GITHUB_TOKEN"
+  else
+    say "GitHub didn't take AGENT_OFFICE_GITHUB_TOKEN; sign in with gh auth login at a desk instead"
+  fi
+fi
+unset AGENT_OFFICE_GITHUB_TOKEN
+
 "${AS_USER[@]}" mkdir -p $RUN_HOME/workspace
 # Once: after that, the folder is the admins' to move in ⚙️ Settings.
 if [[ ! -f $RUN_HOME/agent-office/.agent-office/projects-folder.json ]]; then
